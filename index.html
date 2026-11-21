@@ -1064,7 +1064,8 @@ function applyAiPreset(text) {
 }
 
 async function callGeminiJSON(prompt, systemInstruction, apiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const cleanKey = (apiKey || '').trim();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${cleanKey}`;
     const payload = {
         contents: [{ parts: [{ text: prompt }] }],
         systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
@@ -1073,21 +1074,32 @@ async function callGeminiJSON(prompt, systemInstruction, apiKey) {
         }
     };
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
+    let retries = 0;
+    const maxRetries = 3;
+    while (retries < maxRetries) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errText.slice(0, 140)}`);
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`API Request Error [${response.status}]: ${errText.slice(0, 140)}`);
+            }
+
+            const result = await response.json();
+            let rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!rawText) throw new Error('Format respons API tidak sesuai.');
+            rawText = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+            return JSON.parse(rawText);
+        } catch (err) {
+            retries++;
+            if (retries >= maxRetries) throw err;
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
+        }
     }
-
-    const result = await response.json();
-    const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error('Respons AI kosong atau tidak valid.');
-    return JSON.parse(rawText);
 }
 
 async function suggestAiTopics() {
